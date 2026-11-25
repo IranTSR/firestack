@@ -81,6 +81,11 @@ fi
 go version
 go env
 
+# go.mod/go.sum may be stale after a dependency swap (e.g. wireguard-go ->
+# amneziawg-go); regenerate the sums so the build does not fail on missing
+# go.sum entries. Workspace-only; nothing is committed back.
+go mod tidy
+
 # checkout tagged branch?
 # git checkout -b "$VERSION"
 

@@ -35,10 +35,10 @@ import (
 	"github.com/celzero/firestack/intra/ipn/multihost"
 	"github.com/celzero/firestack/intra/settings"
 
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/celzero/firestack/intra/log"
 	"golang.org/x/sys/unix"
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/device"
 )
 
 // from: github.com/WireGuard/wireguard-go/blob/ebbd4a433/conn/bind_std.go
@@ -141,7 +141,6 @@ type StdNetBind struct {
 	connect connector
 	pm      *atomic.Pointer[multihost.MHMap] // peer ip:port or host => preferred-addrs
 
-	amnezia *atomic.Pointer[Amnezia] // may return nil *Amnezia
 	floodBa *core.Barrier[int, netip.AddrPort]
 
 	mu   sync.RWMutex   // protects following fields
@@ -174,7 +173,7 @@ type obsMsg struct {
 }
 
 // TODO: get d, ep, f, rb through an Opts bag?
-func NewEndpoint(ctx context.Context, id string, d connector, pm *atomic.Pointer[multihost.MHMap], f rwobserver, a *atomic.Pointer[Amnezia]) *StdNetBind {
+func NewEndpoint(ctx context.Context, id string, d connector, pm *atomic.Pointer[multihost.MHMap], f rwobserver) *StdNetBind {
 	s := &StdNetBind{
 		ctx:      ctx,
 		id:       id,
@@ -182,7 +181,6 @@ func NewEndpoint(ctx context.Context, id string, d connector, pm *atomic.Pointer
 		pm:       pm,
 		observer: f,
 		obsCh:    make(chan obsMsg, 8), // buffered for async delivery
-		amnezia:  a,
 		floodBa:  core.NewKeyedBarrier[int, netip.AddrPort](ctx, "wg.flood."+id, minFloodInterval),
 		eps:      make(map[netip.AddrPort]*StdNetEndpoint),
 	}
@@ -638,35 +636,29 @@ func (s *StdNetBind) makeReceiveFn(fd int, uc net.PacketConn) conn.ReceiveFunc {
 			s.sendObsMsg(op, err)
 		}()
 
-		amnezia := s.amnezia.Load()
-		usingamz := amnezia.Set()
-		overwritten := false
-
 		numMsgs := 0
 		b := bufs[0] // usually sized device.MaxMessageSize
 
 		n, addr, err := uc.ReadFrom(b)
 		if err == nil {
-			b, overwritten = amnezia.recv(b, n)
+			// No Amnezia rewriting here: the amneziawg-go device itself
+			// de-obfuscates inbound packets. The old Bind-layer recv()
+			// hook is deleted; re-adding it would double-obfuscate and
+			// break handshakes (invalid mac1).
 			numMsgs++
 		}
 
 		var epsz int
 		for i := range numMsgs {
 			anyProcessed = true
-			if overwritten {
-				copy(bufs[i], b)
-				sizes[i] = len(b)
-			} else { // bufs remained unchanged
-				sizes[i] = n
-			}
+			sizes[i] = n
 			anyTransportTyp = anyTransportTyp || transportType(bufs[i])
 			epsz, eps[i] = s.asEndpoint(addr)
 		}
 
 		if err != nil || log.Debug { // log errors if in debug mode
-			loge(err)("wg: bind: recv: %s (%s) recvfrom(%v / %d): %d / ov? %t<=%t / transport? %t / err? %v",
-				s.id, who, addr, epsz, n, usingamz, overwritten, anyTransportTyp, err)
+			loge(err)("wg: bind: recv: %s (%s) recvfrom(%v / %d): %d / transport? %t / err? %v",
+				s.id, who, addr, epsz, n, anyTransportTyp, err)
 		}
 		return numMsgs, err
 	}
@@ -739,15 +731,12 @@ func (s *StdNetBind) Send(buf [][]byte, peer conn.Endpoint) (err error) {
 	}
 
 	var floodWg = settings.FloodWireGuard.Load()
-	var flooded, overwritten, unreach bool
+	var flooded, unreach bool
 	var nn int
 	var errs error
 
-	amnezia := s.amnezia.Load()
-	hasAmnezia := amnezia.Set()
-
 	for _, data := range buf {
-		datalen := len(data) // grab the length before amnezia overwrites it
+		datalen := len(data)
 		bufok := datalen > 0
 
 		if false && log.Verbose {
@@ -762,9 +751,11 @@ func (s *StdNetBind) Send(buf [][]byte, peer conn.Endpoint) (err error) {
 		anyProcessed = true
 		anyTransportTyp = anyTransportTyp || transportType(data)
 
-		overwritten = amnezia.send(&data)
-
-		if !flooded && (floodWg || hasAmnezia) {
+		// No Amnezia rewriting here: the amneziawg-go device itself
+		// obfuscates outbound packets. The old Bind-layer send() hook
+		// is deleted; re-adding it would double-obfuscate and break
+		// handshakes (invalid mac1).
+		if !flooded && floodWg {
 			switch datalen {
 			case device.MessageInitiationSize:
 				s.flood(fd, uc, ep, fkHandshake) // was probably a handshake
@@ -799,8 +790,8 @@ func (s *StdNetBind) Send(buf [][]byte, peer conn.Endpoint) (err error) {
 	s.sendAddr.Store(&dstIpp)
 
 	if errs != nil || log.Debug {
-		loge(errs)("wg: bind: send: %s (%d) addr(%v) parcels(%d) tx(%d) (flooded? %t (enabled? %t) / overw? %t / trans? %t); unreach? %t, err? %v",
-			s.id, fd, dstIpp, len(buf), nn, flooded, floodWg, overwritten, anyTransportTyp, unreach, errs)
+		loge(errs)("wg: bind: send: %s (%d) addr(%v) parcels(%d) tx(%d) (flooded? %t (enabled? %t) / trans? %t); unreach? %t, err? %v",
+			s.id, fd, dstIpp, len(buf), nn, flooded, floodWg, anyTransportTyp, unreach, errs)
 	}
 	if unreach {
 		errs = ErrPeerUnreachable
@@ -998,7 +989,11 @@ func transportType(unobs []byte) (y bool) {
 }
 
 // messageType reports whether unobs is of type t message.
-// "unobs" must be free of Amnezia-like obfuscations.
+// Note: with Amnezia enabled the amneziawg-go device rewrites packet
+// headers before the Bind sees them, so transport packets are no longer
+// recognisable here and are classified as Crc/Csn instead of Rcv/Snd.
+// That only affects "last good data rx/tx" stats (and may trigger an
+// extra keepalive ping); tunnel health uses the handshake time instead.
 func messageType(unobs []byte, t uint32) (y bool) {
 	var typ uint32
 	n := len(unobs)

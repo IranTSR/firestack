@@ -3,6 +3,7 @@ module github.com/celzero/firestack
 go 1.27.4
 
 require (
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20261116
 	github.com/celzero/gotrie v0.0.0-20250314130138-a2756ab2f6bd
 	github.com/cloudflare/odoh-go v1.0.1-0.20230926114050-f39fa019b017
 	github.com/coder/websocket v1.8.15
@@ -21,7 +22,6 @@ require (
 	golang.org/x/net v0.63.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/time v0.16.0
-	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee
 	gvisor.dev/gvisor v0.0.0-20261123184027-c5a0a0c131d3
 )
 

@@ -32,6 +32,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 	x "github.com/celzero/firestack/intra/backend"
 	"github.com/celzero/firestack/intra/core"
 	"github.com/celzero/firestack/intra/ipn/multihost"
@@ -40,9 +43,6 @@ import (
 	"github.com/celzero/firestack/intra/netstack"
 	"github.com/celzero/firestack/intra/protect"
 	"github.com/celzero/firestack/intra/settings"
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/tun"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -692,49 +692,110 @@ func wgIfConfigOf(id string, txtptr *string) (opts wgifopts, err error) {
 			if b, err := base64.StdEncoding.DecodeString(v); err == nil && len(b) == 3 {
 				// github.com/WireGuard/wireguard-go/blob/12269c2761/device/send.go#L456
 				// github.com/WireGuard/wireguard-go/blob/12269c2761/device/noise-protocol.go#L56
-				h1 := append([]byte{device.MessageInitiationType}, b...)
-				h2 := append([]byte{device.MessageResponseType}, b...)
-				h3 := append([]byte{device.MessageCookieReplyType}, b...)
-				h4 := append([]byte{device.MessageTransportType}, b...)
+				// byte(...) casts: amneziawg-go's message-type consts are
+				// typed uint32 (wireguard-go's were untyped), so a bare
+				// []byte{device.MessageInitiationType} no longer compiles.
+				h1 := append([]byte{byte(device.MessageInitiationType)}, b...)
+				h2 := append([]byte{byte(device.MessageResponseType)}, b...)
+				h3 := append([]byte{byte(device.MessageCookieReplyType)}, b...)
+				h4 := append([]byte{byte(device.MessageTransportType)}, b...)
 				// overwrite the 3 reserved bytes on all packets
 				// github.com/bepass-org/warp-plus/blob/19ac233cc6/wireguard/device/receive.go#L138
 				opts.amnezia.H1 = binary.LittleEndian.Uint32(h1)
 				opts.amnezia.H2 = binary.LittleEndian.Uint32(h2)
 				opts.amnezia.H3 = binary.LittleEndian.Uint32(h3)
 				opts.amnezia.H4 = binary.LittleEndian.Uint32(h4)
+				// forward to the amneziawg device via UAPI: the engine
+				// applies the warp reserved-bytes header rewrite itself.
+				// A single-value hN is a fixed header (lo == hi range).
+				pcfg.WriteString(fmt.Sprintf("h1=%d\n", opts.amnezia.H1))
+				pcfg.WriteString(fmt.Sprintf("h2=%d\n", opts.amnezia.H2))
+				pcfg.WriteString(fmt.Sprintf("h3=%d\n", opts.amnezia.H3))
+				pcfg.WriteString(fmt.Sprintf("h4=%d\n", opts.amnezia.H4))
 				log.D("proxy: wg: %s ifconfig: clientid(%d) %v", id, len(b), b)
 			} else {
 				log.W("proxy: wg: %s ifconfig: clientid(%v) %d == 3?; err: %v",
 					id, v, len(b), err)
 			}
 		case "jc":
-			// github.com/amnezia-vpn/amneziawg-go/blob/2e3f7d122c/device/uapi.go#L286
+			// github.com/amnezia-vpn/amneziawg-go/blob/v3.1.20261116/device/uapi.go (case "jc")
+			// Forwarded to the device via UAPI (pcfg) so the engine
+			// applies it; opts.amnezia only mirrors it for logging and
+			// update-compat checks. Same for jmin/jmax/s1-s4/h1-h4 below.
 			jc, _ := strconv.Atoi(v)
 			opts.amnezia.Jc = uint16(jc)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "jmin":
 			jmin, _ := strconv.Atoi(v)
 			opts.amnezia.Jmin = uint16(jmin)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "jmax":
 			jmax, _ := strconv.Atoi(v)
 			opts.amnezia.Jmax = uint16(jmax)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "s1":
 			s1, _ := strconv.Atoi(v)
 			opts.amnezia.S1 = uint16(s1)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "s2":
 			s2, _ := strconv.Atoi(v)
 			opts.amnezia.S2 = uint16(s2)
+			pcfg.WriteString(k + "=" + v + "\n")
+		case "s3":
+			// new: no app-side field yet; accepted so pasted/imported
+			// configs carrying s3 work, and the UI workstream can add
+			// a matching field using this exact UAPI key name.
+			s3, _ := strconv.Atoi(v)
+			opts.amnezia.S3 = uint16(s3)
+			pcfg.WriteString(k + "=" + v + "\n")
+		case "s4":
+			// new: see s3.
+			s4, _ := strconv.Atoi(v)
+			opts.amnezia.S4 = uint16(s4)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "h1":
 			h1, _ := strconv.ParseUint(v, 10, 32)
 			opts.amnezia.H1 = uint32(h1)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "h2":
 			h2, _ := strconv.ParseUint(v, 10, 32)
 			opts.amnezia.H2 = uint32(h2)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "h3":
 			h3, _ := strconv.ParseUint(v, 10, 32)
 			opts.amnezia.H3 = uint32(h3)
+			pcfg.WriteString(k + "=" + v + "\n")
 		case "h4":
 			h4, _ := strconv.ParseUint(v, 10, 32)
 			opts.amnezia.H4 = uint32(h4)
+			pcfg.WriteString(k + "=" + v + "\n")
+		case "i1", "i2", "i3", "i4", "i5":
+			// new: no app-side field yet; accepted so pasted/imported
+			// configs carrying i1-i5 work, and the UI workstream can
+			// add matching fields using these exact UAPI key names.
+			// Value is an obfuscation-chain spec ("<tag ...>...") whose
+			// payloads may be case-sensitive, so keep the original-case
+			// value instead of the lowercased v.
+			_, ival, _ := strings.Cut(line, "=")
+			ival = strings.TrimSpace(ival)
+			switch k {
+			case "i1":
+				opts.amnezia.I1 = ival
+			case "i2":
+				opts.amnezia.I2 = ival
+			case "i3":
+				opts.amnezia.I3 = ival
+			case "i4":
+				opts.amnezia.I4 = ival
+			case "i5":
+				opts.amnezia.I5 = ival
+			}
+			pcfg.WriteString(k + "=" + ival + "\n")
+		case "header_protection_key":
+			// new: no app-side field yet; see i1-i5. 32-byte hex key.
+			_, hpk, _ := strings.Cut(line, "=")
+			opts.amnezia.HeaderProtectionKey = strings.TrimSpace(hpk)
+			pcfg.WriteString(k + "=" + strings.TrimSpace(hpk) + "\n")
 		default:
 			log.D("proxy: wg: %s ifconfig: skipping key %q", id, k)
 			pcfg.WriteString(line + "\n")
@@ -807,9 +868,9 @@ func NewWgProxy(pctx context.Context, id string, ctl protect.Controller, px Prox
 
 	var wgep wgconn
 	if wgtun.preferOffload {
-		wgep = wg.NewEndpoint2(pctx, wgtun.who(), wgtun.serve, &wgtun.remote, wgtun.listener, &wgtun.amnezia)
+		wgep = wg.NewEndpoint2(pctx, wgtun.who(), wgtun.serve, &wgtun.remote, wgtun.listener)
 	} else {
-		wgep = wg.NewEndpoint(pctx, wgtun.who(), wgtun.serve, &wgtun.remote, wgtun.listener, &wgtun.amnezia)
+		wgep = wg.NewEndpoint(pctx, wgtun.who(), wgtun.serve, &wgtun.remote, wgtun.listener)
 	}
 
 	wgdev := newdevice(wgtun, wgep)

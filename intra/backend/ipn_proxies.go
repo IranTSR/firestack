@@ -41,6 +41,9 @@ const ( // see ipn/proxies.go
 	OrbotS5 = "OrbotSocks5"
 	// Orbot: Base Tor-as-a-HTTP/1.1 proxy
 	OrbotH1 = "OrbotHttp1"
+	// Aether: the vendored Aether engine (Rust core) as a SOCKS5 proxy.
+	// The app registers the engine under this id; see ipn/aether.go.
+	AetherS5 = "AETHER"
 	// Global: HTTP/1.1 proxy if required by underlying network.
 	GlobalH1 = "GlobalHttp1"
 
@@ -48,6 +51,10 @@ const ( // see ipn/proxies.go
 
 	// SOCKS5 proxy type
 	SOCKS5 = "socks5"
+	// Aether engine proxy type and scheme (see ipn/aether.go). Dial-wise
+	// it IS a SOCKS5 proxy to the engine's loopback listener; the distinct
+	// type exists so the backend can tell it apart from a user SOCKS5.
+	AETHER = "aether"
 	// HTTP/1.1 proxy type
 	HTTP1 = "http1"
 	// WireGuard-as-a-proxy type and prefix

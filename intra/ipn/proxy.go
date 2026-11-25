@@ -285,6 +285,10 @@ func (pxr *proxifier) fromOpts(id string, opts *settings.ProxyOptions) (Proxy, e
 	switch opts.Scheme {
 	case "socks5":
 		p, err = NewSocks5Proxy(id, pxr.ctx, pxr.ctl, pxr, opts)
+	case "aether":
+		// Aether engine (vendored Rust core): a SOCKS5 proxy served by
+		// the in-process engine on loopback; see intra/ipn/aether.go.
+		p, err = NewAetherProxy(id, pxr.ctx, pxr.ctl, pxr, opts)
 	case "http":
 		fallthrough
 	case "https":

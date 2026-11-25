@@ -24,13 +24,13 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/celzero/firestack/intra/core"
 	"github.com/celzero/firestack/intra/ipn/multihost"
 	"github.com/celzero/firestack/intra/log"
 	"github.com/celzero/firestack/intra/settings"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"golang.zx2c4.com/wireguard/conn"
 )
 
 // commit: github.com/WireGuard/wireguard-go/commit/3bb8fec7e
@@ -48,7 +48,6 @@ type StdNetBind2 struct {
 	observer rwobserver
 	sendAddr atomic.Pointer[netip.AddrPort]   // may be invalid
 	pm       *atomic.Pointer[multihost.MHMap] // peer ip:port or host => preferred-addrs
-	amnezia  *atomic.Pointer[Amnezia]         // unused; amnezia/warp config, if any
 
 	ipv4 *net.UDPConn
 	ipv6 *net.UDPConn
@@ -134,14 +133,13 @@ func (e ErrUDPGSODisabled) Unwrap() error {
 	return e.RetryErr
 }
 
-func NewEndpoint2(ctx context.Context, id string, d connector, pm *atomic.Pointer[multihost.MHMap], f rwobserver, a *atomic.Pointer[Amnezia]) *StdNetBind2 {
+func NewEndpoint2(ctx context.Context, id string, d connector, pm *atomic.Pointer[multihost.MHMap], f rwobserver) *StdNetBind2 {
 	s := &StdNetBind2{
 		ctx:      ctx,
 		id:       id,
 		connect:  d,
 		observer: f,
 		pm:       pm,
-		amnezia:  a,
 		obsCh:    make(chan obsMsg, 8), // buffered for async delivery
 
 		udpAddrPool: sync.Pool{

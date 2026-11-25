@@ -38,6 +38,7 @@ const (
 	Ingress  = x.Ingress // dummy
 	OrbotS5  = x.OrbotS5
 	OrbotH1  = x.OrbotH1
+	AetherS5 = x.AetherS5
 	GlobalH1 = x.GlobalH1
 	RpnWin   = x.RpnWin
 	RpnWs    = x.RpnWs
@@ -45,6 +46,7 @@ const (
 	RpnH2    = x.RpnH2
 
 	SOCKS5   = x.SOCKS5
+	AETHER   = x.AETHER
 	HTTP1    = x.HTTP1
 	WG       = x.WG
 	WGFAST   = x.WGFAST
@@ -1801,6 +1803,10 @@ func isWG(id string) bool {
 
 func isOrbot(id string) bool {
 	return id == OrbotH1 || id == OrbotS5
+}
+
+func isAether(id string) bool {
+	return id == AetherS5
 }
 
 func isGlobalH1(id string) bool {
