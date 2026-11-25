@@ -38,12 +38,19 @@ LINUX_BUILDDIR=$(BUILDDIR)/linux
 # NDK llvm-objcopy for extracting / stripping debug symbols from .so files
 # ANDROID_NDK_HOME is exported by make-aar (or set in the environment)
 NDK_ROOT ?= $(ANDROID_NDK_HOME)
-# First tries the NDK-canonical path
+# First tries the NDK-canonical path, checking ANDROID_NDK_HOME /
+# ANDROID_NDK_ROOT before NDK_ROOT: JitPack exports NDK_ROOT pointing at
+# the NDK parent dir (.../.android/ndk/), not a versioned NDK, so
+# NDK_ROOT alone resolves to a non-existent llvm-objcopy (Error 127)
+# and the whole JitPack build fails at the debug-symbols step.
 # falls back to command -v llvm-objcopy from PATH
 # Last resort: just llvm-objcopy (so it fails with a clearer error)
 LLVM_OBJCOPY ?= $(shell \
-  ndkcp="$(NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy"; \
-  if [ -x "$$ndkcp" ]; then echo "$$ndkcp"; else command -v llvm-objcopy 2>/dev/null || echo "llvm-objcopy"; fi)
+  for d in "$(ANDROID_NDK_HOME)" "$(ANDROID_NDK_ROOT)" "$(NDK_ROOT)"; do \
+    ndkcp="$$d/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy"; \
+    if [ -x "$$ndkcp" ]; then echo "$$ndkcp"; exit 0; fi; \
+  done; \
+  command -v llvm-objcopy 2>/dev/null || echo "llvm-objcopy")
 ARCHS = armeabi-v7a arm64-v8a x86 x86_64
 DEBUG_SYMBOLS_DIR = $(BUILDDIR)/intra/debug-symbols
 DEBUG_SYMBOLS_ZIP = $(BUILDDIR)/intra/tun2socks-debug-symbols.zip
